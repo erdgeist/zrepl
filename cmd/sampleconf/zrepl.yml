@@ -1,5 +1,5 @@
 pools:
-  - name: offsite_backups
+  offsite_backups:
     transport:
       ssh:
         host: 192.168.122.6
@@ -8,21 +8,26 @@ pools:
         identity_file: /etc/zrepl/identities/offsite_backups
 
 pushs:
-  - to: offsite_backups
+
+  offsite:
+    to: offsite_backups
     filter: {
       "tank/var/db*":"ok",
       "tank/usr/home*":"ok"
     }
 
 pulls:
-  - from: offsite_backups
+
+  offsite:
+    from: offsite_backups
     mapping: {
       # like in sinks
     }
 
   # local replication, only allowed in pull mode
   # the from name 'local' is reserved for this purpose
-  - from: local
+  homemirror:
+    from: local
     repeat:
       interval: 15m
     mapping: {
@@ -88,7 +93,7 @@ pull_acls:
 
 prune:
 
-  - name: clean_backups
+  clean_backups:
     policy: grid
     grid: 6x10min | 24x1h | 7x1d | 32 x 1d | 4 x 3mon
     dataset_filter: {
@@ -98,7 +103,7 @@ prune:
       prefix: zrepl_
     }
 
-  - name: hfbak_prune # cleans up after hfbak autosnap job
+  hfbak_prune: # cleans up after hfbak autosnap job
     policy: grid
     grid: 1x1min(keep=all)
     dataset_filter: {
@@ -110,7 +115,7 @@ prune:
 
 autosnap:
 
-  - name: hfbak
+  hfbak:
     prefix: zrepl_hfbak_
     interval: 1s
     dataset_filter: {

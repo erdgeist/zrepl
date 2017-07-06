@@ -19,6 +19,13 @@ import (
 	"time"
 )
 
+var (
+	JobSectionPush     string = "push"
+	JobSectionPull     string = "pull"
+	JobSectionPrune    string = "prune"
+	JobSectionAutosnap string = "autosnap"
+)
+
 type Pool struct {
 	Name      string
 	Transport Transport
@@ -43,12 +50,14 @@ type SSHTransport struct {
 }
 
 type Push struct {
+	JobName           string // for use with jobrun package
 	To                *Pool
 	Filter            zfs.DatasetMapping
 	InitialReplPolicy rpc.InitialReplPolicy
 	RepeatStrategy    jobrun.RepeatStrategy
 }
 type Pull struct {
+	JobName           string // for use with jobrun package
 	From              *Pool
 	Mapping           zfs.DatasetMapping
 	InitialReplPolicy rpc.InitialReplPolicy
@@ -61,27 +70,27 @@ type ClientMapping struct {
 }
 
 type Prune struct {
-	Name            string
+	JobName         string // for use with jobrun package
 	DatasetFilter   zfs.DatasetMapping
 	SnapshotFilter  zfs.FilesystemVersionFilter
 	RetentionPolicy *RetentionGrid // TODO abstract interface to support future policies?
 }
 
 type Autosnap struct {
-	Name          string
+	JobName       string // for use with jobrun package
 	Prefix        string
 	Interval      jobrun.RepeatStrategy
 	DatasetFilter zfs.DatasetMapping
 }
 
 type Config struct {
-	Pools     []Pool
-	Pushs     []Push
-	Pulls     []Pull
+	Pools     map[string]*Pool
+	Pushs     map[string]*Push
+	Pulls     map[string]*Pull
 	Sinks     []ClientMapping
 	PullACLs  []ClientMapping
-	Prunes    []Prune
-	Autosnaps []Autosnap
+	Prunes    map[string]*Prune
+	Autosnaps map[string]*Autosnap
 }
 
 func ParseConfig(path string) (config Config, err error) {
@@ -109,7 +118,7 @@ func parseMain(root map[string]interface{}) (c Config, err error) {
 	poolLookup := func(name string) (*Pool, error) {
 		for _, pool := range c.Pools {
 			if pool.Name == name {
-				return &pool, nil
+				return pool, nil
 			}
 		}
 		return nil, errors.New(fmt.Sprintf("pool '%s' not defined", name))
@@ -133,23 +142,32 @@ func parseMain(root map[string]interface{}) (c Config, err error) {
 	if c.Autosnaps, err = parseAutosnaps(root["autosnap"]); err != nil {
 		return
 	}
+
 	return
 }
 
-func parsePools(v interface{}) (pools []Pool, err error) {
+func fullJobName(section, name string) (full string, err error) {
+	if len(name) < 1 {
+		err = fmt.Errorf("job name not set")
+		return
+	}
+	full = fmt.Sprintf("%s.%s", section, name)
+	return
+}
 
-	asList := make([]struct {
-		Name      string
+func parsePools(v interface{}) (pools map[string]*Pool, err error) {
+
+	asMap := make(map[string]struct {
 		Transport map[string]interface{}
 	}, 0)
-	if err = mapstructure.Decode(v, &asList); err != nil {
+	if err = mapstructure.Decode(v, &asMap); err != nil {
 		return
 	}
 
-	pools = make([]Pool, len(asList))
-	for i, p := range asList {
+	pools = make(map[string]*Pool, len(asMap))
+	for name, p := range asMap {
 
-		if p.Name == rpc.LOCAL_TRANSPORT_IDENTITY {
+		if name == rpc.LOCAL_TRANSPORT_IDENTITY {
 			err = errors.New(fmt.Sprintf("pool name '%s' reserved for local pulls", rpc.LOCAL_TRANSPORT_IDENTITY))
 			return
 		}
@@ -158,8 +176,8 @@ func parsePools(v interface{}) (pools []Pool, err error) {
 		if transport, err = parseTransport(p.Transport); err != nil {
 			return
 		}
-		pools[i] = Pool{
-			Name:      p.Name,
+		pools[name] = &Pool{
+			Name:      name,
 			Transport: transport,
 		}
 	}
@@ -194,31 +212,34 @@ func parseTransport(it map[string]interface{}) (t Transport, err error) {
 
 type poolLookup func(name string) (*Pool, error)
 
-func parsePushs(v interface{}, pl poolLookup) (p []Push, err error) {
+func parsePushs(v interface{}, pl poolLookup) (p map[string]*Push, err error) {
 
-	asList := make([]struct {
+	asMap := make(map[string]struct {
 		To                string
 		Filter            map[string]string
 		InitialReplPolicy string
 		Repeat            map[string]string
 	}, 0)
 
-	if err = mapstructure.Decode(v, &asList); err != nil {
+	if err = mapstructure.Decode(v, &asMap); err != nil {
 		return
 	}
 
-	p = make([]Push, len(asList))
+	p = make(map[string]*Push, len(asMap))
 
-	for i, e := range asList {
+	for name, e := range asMap {
 
 		var toPool *Pool
 		if toPool, err = pl(e.To); err != nil {
 			return
 		}
-		push := Push{
+		push := &Push{
 			To: toPool,
 		}
 
+		if push.JobName, err = fullJobName(JobSectionPush, name); err != nil {
+			return
+		}
 		if push.Filter, err = parseComboMapping(e.Filter); err != nil {
 			return
 		}
@@ -231,28 +252,28 @@ func parsePushs(v interface{}, pl poolLookup) (p []Push, err error) {
 			return
 		}
 
-		p[i] = push
+		p[push.JobName] = push
 	}
 
 	return
 }
 
-func parsePulls(v interface{}, pl poolLookup) (p []Pull, err error) {
+func parsePulls(v interface{}, pl poolLookup) (p map[string]*Pull, err error) {
 
-	asList := make([]struct {
+	asMap := make(map[string]struct {
 		From              string
 		Mapping           map[string]string
 		InitialReplPolicy string
 		Repeat            map[string]string
 	}, 0)
 
-	if err = mapstructure.Decode(v, &asList); err != nil {
+	if err = mapstructure.Decode(v, &asMap); err != nil {
 		return
 	}
 
-	p = make([]Pull, len(asList))
+	p = make(map[string]*Pull, len(asMap))
 
-	for i, e := range asList {
+	for name, e := range asMap {
 
 		var fromPool *Pool
 
@@ -267,8 +288,11 @@ func parsePulls(v interface{}, pl poolLookup) (p []Pull, err error) {
 			}
 		}
 
-		pull := Pull{
+		pull := &Pull{
 			From: fromPool,
+		}
+		if pull.JobName, err = fullJobName(JobSectionPull, name); err != nil {
+			return
 		}
 		if pull.Mapping, err = parseComboMapping(e.Mapping); err != nil {
 			return
@@ -280,7 +304,7 @@ func parsePulls(v interface{}, pl poolLookup) (p []Pull, err error) {
 			return
 		}
 
-		p[i] = pull
+		p[pull.JobName] = pull
 	}
 
 	return
@@ -457,26 +481,29 @@ func (t *LocalTransport) SetHandler(handler rpc.RPCHandler) {
 	t.Handler = handler
 }
 
-func parsePrunes(m interface{}) (rets []Prune, err error) {
+func parsePrunes(m interface{}) (rets map[string]*Prune, err error) {
 
-	asList := make([]map[string]interface{}, 0)
+	asList := make(map[string]map[string]interface{}, 0)
 	if err = mapstructure.Decode(m, &asList); err != nil {
 		return
 	}
 
-	rets = make([]Prune, len(asList))
+	rets = make(map[string]*Prune, len(asList))
 
-	for i, e := range asList {
-		if rets[i], err = parsePrune(e); err != nil {
-			err = fmt.Errorf("cannot parse prune job #%d: %s", i+1, err)
+	for name, e := range asList {
+		var prune *Prune
+		if prune, err = parsePrune(e, name); err != nil {
+			err = fmt.Errorf("cannot parse prune job %s: %s", name, err)
 			return
 		}
+		rets[prune.JobName] = prune
 	}
 
 	return
 }
 
-func parsePrune(e map[string]interface{}) (prune Prune, err error) {
+func parsePrune(e map[string]interface{}, name string) (prune *Prune, err error) {
+
 	// Only support grid policy for now
 	policyName, ok := e["policy"]
 	if !ok || policyName != "grid" {
@@ -485,7 +512,6 @@ func parsePrune(e map[string]interface{}) (prune Prune, err error) {
 	}
 
 	var i struct {
-		Name           string
 		Grid           string
 		DatasetFilter  map[string]string `mapstructure:"dataset_filter"`
 		SnapshotFilter map[string]string `mapstructure:"snapshot_filter"`
@@ -495,7 +521,11 @@ func parsePrune(e map[string]interface{}) (prune Prune, err error) {
 		return
 	}
 
-	prune.Name = i.Name
+	prune = &Prune{}
+
+	if prune.JobName, err = fullJobName(JobSectionPrune, name); err != nil {
+		return
+	}
 
 	// Parse grid policy
 	intervals, err := parseRetentionGridIntervalsString(i.Grid)
@@ -636,30 +666,31 @@ func parseSnapshotFilter(fm map[string]string) (snapFilter zfs.FilesystemVersion
 	return
 }
 
-func parseAutosnaps(m interface{}) (snaps []Autosnap, err error) {
+func parseAutosnaps(m interface{}) (snaps map[string]*Autosnap, err error) {
 
-	asList := make([]map[string]interface{}, 0)
-	if err = mapstructure.Decode(m, &asList); err != nil {
+	asMap := make(map[string]interface{}, 0)
+	if err = mapstructure.Decode(m, &asMap); err != nil {
 		return
 	}
 
-	snaps = make([]Autosnap, len(asList))
+	snaps = make(map[string]*Autosnap, len(asMap))
 
-	for i, e := range asList {
-		if snaps[i], err = parseAutosnap(e); err != nil {
-			err = fmt.Errorf("cannot parse autonsap job #%d: %s", i+1, err)
+	for name, e := range asMap {
+		var snap *Autosnap
+		if snap, err = parseAutosnap(e, name); err != nil {
+			err = fmt.Errorf("cannot parse autonsap job %s: %s", name, err)
 			return
 		}
+		snaps[snap.JobName] = snap
 	}
 
 	return
 
 }
 
-func parseAutosnap(m map[string]interface{}) (a Autosnap, err error) {
+func parseAutosnap(m interface{}, name string) (a *Autosnap, err error) {
 
 	var i struct {
-		Name          string
 		Prefix        string
 		Interval      string
 		DatasetFilter map[string]string `mapstructure:"dataset_filter"`
@@ -670,7 +701,11 @@ func parseAutosnap(m map[string]interface{}) (a Autosnap, err error) {
 		return
 	}
 
-	a.Name = i.Name
+	a = &Autosnap{}
+
+	if a.JobName, err = fullJobName(JobSectionAutosnap, name); err != nil {
+		return
+	}
 
 	if len(i.Prefix) < 1 {
 		err = fmt.Errorf("prefix must not be empty")
