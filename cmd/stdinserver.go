@@ -42,31 +42,30 @@ func cmdStdinServer(cmd *cobra.Command, args []string) {
 	}
 	identity := stdinserver.identity
 
+	pullACL := conf.PullACLs[identity]
+	if pullACL == nil {
+		err = fmt.Errorf("could not find PullACL for identity '%s'", identity)
+		return
+	}
+
 	var sshByteStream io.ReadWriteCloser
 	if sshByteStream, err = sshbytestream.Incoming(); err != nil {
 		return
 	}
 
-	findMapping := func(cm []ClientMapping, identity string) zfs.DatasetMapping {
-		for i := range cm {
-			if cm[i].From == identity {
-				return cm[i].Mapping
-			}
-		}
-		return nil
-	}
-	sinkMapping := func(identity string) (sink zfs.DatasetMapping, err error) {
-		if sink = findMapping(conf.Sinks, identity); sink == nil {
+	sinkMapping := func(identity string) (m zfs.DatasetMapping, err error) {
+		sink := conf.Sinks[identity]
+		if sink == nil {
 			return nil, fmt.Errorf("could not find sink for dataset")
 		}
-		return
+		return sink.Mapping, nil
 	}
 
 	sinkLogger := golog.New(logOut, fmt.Sprintf("sink[%s] ", identity), logFlags)
 	handler := Handler{
 		Logger:          sinkLogger,
 		SinkMappingFunc: sinkMapping,
-		PullACL:         findMapping(conf.PullACLs, identity),
+		PullACL:         pullACL.Mapping,
 	}
 
 	if err = rpc.ListenByteStreamRPC(sshByteStream, identity, handler, sinkLogger); err != nil {

@@ -85,12 +85,12 @@ type Autosnap struct {
 
 type Config struct {
 	Pools     map[string]*Pool
-	Pushs     map[string]*Push
-	Pulls     map[string]*Pull
-	Sinks     []ClientMapping
-	PullACLs  []ClientMapping
-	Prunes    map[string]*Prune
-	Autosnaps map[string]*Autosnap
+	Pushs     map[string]*Push          // job name -> job
+	Pulls     map[string]*Pull          // job name -> job
+	Sinks     map[string]*ClientMapping // client identity -> mapping
+	PullACLs  map[string]*ClientMapping // client identity -> mapping
+	Prunes    map[string]*Prune         // job name -> job
+	Autosnaps map[string]*Autosnap      // job name -> job
 }
 
 func ParseConfig(path string) (config Config, err error) {
@@ -361,35 +361,34 @@ func expectList(v interface{}) (asList []interface{}, err error) {
 	return
 }
 
-func parseClientMappings(v interface{}) (cm []ClientMapping, err error) {
+func parseClientMappings(v interface{}) (cm map[string]*ClientMapping, err error) {
 
-	var asList []interface{}
-	if asList, err = expectList(v); err != nil {
+	asMap, ok := v.(map[string]interface{})
+	if !ok {
 		return
 	}
 
-	cm = make([]ClientMapping, len(asList))
+	cm = make(map[string]*ClientMapping, len(asMap))
 
-	for i, e := range asList {
-		var m ClientMapping
-		if m, err = parseClientMapping(e); err != nil {
+	for identity, e := range asMap {
+		var m *ClientMapping
+		if m, err = parseClientMapping(e, identity); err != nil {
 			return
 		}
-		cm[i] = m
+		cm[identity] = m
 	}
 	return
 }
 
-func parseClientMapping(v interface{}) (s ClientMapping, err error) {
+func parseClientMapping(v interface{}, identity string) (s *ClientMapping, err error) {
 	t := struct {
-		From    string
 		Mapping map[string]string
 	}{}
 	if err = mapstructure.Decode(v, &t); err != nil {
 		return
 	}
 
-	s.From = t.From
+	s.From = identity
 	s.Mapping, err = parseComboMapping(t.Mapping)
 	return
 }
