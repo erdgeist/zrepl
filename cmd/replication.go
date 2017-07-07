@@ -55,7 +55,10 @@ func cmdPush(cmd *cobra.Command, args []string) {
 		log.Printf("could not find push job %s", args[0])
 		os.Exit(1)
 	}
-	jobPush(job, log)
+	if err := jobPush(job, log); err != nil {
+		log.Printf("error doing push: %s", err)
+		os.Exit(1)
+	}
 
 }
 
@@ -70,7 +73,10 @@ func cmdPull(cmd *cobra.Command, args []string) {
 		log.Printf("could not find pull job %s", args[0])
 		os.Exit(1)
 	}
-	jobPull(job, log)
+	if err := jobPull(job, log); err != nil {
+		log.Printf("error doing pull: %s", err)
+		os.Exit(1)
+	}
 
 }
 

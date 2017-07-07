@@ -11,18 +11,13 @@ import (
 	"os"
 )
 
-var stdinserver struct {
-	identity string
-}
-
 var StdinserverCmd = &cobra.Command{
-	Use:   "stdinserver",
+	Use:   "stdinserver CLIENT_IDENTITY",
 	Short: "start in stdin server mode (from authorized_keys file)",
 	Run:   cmdStdinServer,
 }
 
 func init() {
-	StdinserverCmd.Flags().StringVar(&stdinserver.identity, "identity", "", "")
 	RootCmd.AddCommand(StdinserverCmd)
 }
 
@@ -36,11 +31,11 @@ func cmdStdinServer(cmd *cobra.Command, args []string) {
 		}
 	}()
 
-	if stdinserver.identity == "" {
-		err = fmt.Errorf("identity flag not set")
+	if len(args) != 1 || args[0] == "" {
+		err = fmt.Errorf("must specify client identity as positional argument")
 		return
 	}
-	identity := stdinserver.identity
+	identity := args[0]
 
 	pullACL := conf.PullACLs[identity]
 	if pullACL == nil {

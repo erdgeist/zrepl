@@ -10,10 +10,6 @@ import (
 	"time"
 )
 
-var autosnapArgs struct {
-	job string
-}
-
 var AutosnapCmd = &cobra.Command{
 	Use:   "autosnap",
 	Short: "perform automatic snapshotting",
@@ -21,7 +17,6 @@ var AutosnapCmd = &cobra.Command{
 }
 
 func init() {
-	AutosnapCmd.Flags().StringVar(&autosnapArgs.job, "job", "", "job to run")
 	RootCmd.AddCommand(AutosnapCmd)
 }
 

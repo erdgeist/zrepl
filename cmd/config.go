@@ -115,13 +115,12 @@ func parseMain(root map[string]interface{}) (c Config, err error) {
 		return
 	}
 
-	poolLookup := func(name string) (*Pool, error) {
-		for _, pool := range c.Pools {
-			if pool.Name == name {
-				return pool, nil
-			}
+	poolLookup := func(name string) (pool *Pool, err error) {
+		pool = c.Pools[name]
+		if pool == nil {
+			err = fmt.Errorf("pool '%s' not defined", name)
 		}
-		return nil, errors.New(fmt.Sprintf("pool '%s' not defined", name))
+		return
 	}
 
 	if c.Pushs, err = parsePushs(root["pushs"], poolLookup); err != nil {
@@ -252,7 +251,7 @@ func parsePushs(v interface{}, pl poolLookup) (p map[string]*Push, err error) {
 			return
 		}
 
-		p[push.JobName] = push
+		p[name] = push
 	}
 
 	return
@@ -275,11 +274,16 @@ func parsePulls(v interface{}, pl poolLookup) (p map[string]*Pull, err error) {
 
 	for name, e := range asMap {
 
+		if len(e.From) < 1 {
+			err = fmt.Errorf("source pool not set (from attribute is empty)")
+			return
+		}
+
 		var fromPool *Pool
 
 		if e.From == rpc.LOCAL_TRANSPORT_IDENTITY {
 			fromPool = &Pool{
-				Name:      "local",
+				Name:      rpc.LOCAL_TRANSPORT_IDENTITY,
 				Transport: LocalTransport{},
 			}
 		} else {
@@ -304,7 +308,7 @@ func parsePulls(v interface{}, pl poolLookup) (p map[string]*Pull, err error) {
 			return
 		}
 
-		p[pull.JobName] = pull
+		p[name] = pull
 	}
 
 	return
@@ -363,8 +367,8 @@ func expectList(v interface{}) (asList []interface{}, err error) {
 
 func parseClientMappings(v interface{}) (cm map[string]*ClientMapping, err error) {
 
-	asMap, ok := v.(map[string]interface{})
-	if !ok {
+	var asMap map[string]interface{}
+	if err = mapstructure.Decode(v, &asMap); err != nil {
 		return
 	}
 
@@ -387,8 +391,9 @@ func parseClientMapping(v interface{}, identity string) (s *ClientMapping, err e
 	if err = mapstructure.Decode(v, &t); err != nil {
 		return
 	}
-
-	s.From = identity
+	s = &ClientMapping{
+		From: identity,
+	}
 	s.Mapping, err = parseComboMapping(t.Mapping)
 	return
 }
@@ -495,7 +500,7 @@ func parsePrunes(m interface{}) (rets map[string]*Prune, err error) {
 			err = fmt.Errorf("cannot parse prune job %s: %s", name, err)
 			return
 		}
-		rets[prune.JobName] = prune
+		rets[name] = prune
 	}
 
 	return
@@ -680,7 +685,7 @@ func parseAutosnaps(m interface{}) (snaps map[string]*Autosnap, err error) {
 			err = fmt.Errorf("cannot parse autonsap job %s: %s", name, err)
 			return
 		}
-		snaps[snap.JobName] = snap
+		snaps[name] = snap
 	}
 
 	return
